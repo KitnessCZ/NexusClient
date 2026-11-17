@@ -3,10 +3,12 @@ use std::sync::Arc;
 
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
+    event::{TouchPhase, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle},
     window::{Window, WindowId},
 };
+
+use crate::ui::NexusUi;
 
 struct GpuState {
     window: Arc<Window>,
@@ -14,6 +16,7 @@ struct GpuState {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    ui: NexusUi,
 }
 
 impl GpuState {
@@ -22,9 +25,7 @@ impl GpuState {
         window: Arc<Window>,
     ) -> Result<Self, String> {
         let instance = wgpu::Instance::new(
-            wgpu::InstanceDescriptor::new_with_display_handle(
-                Box::new(display),
-            ),
+            wgpu::InstanceDescriptor::new_with_display_handle(Box::new(display)),
         );
 
         let surface = instance
@@ -54,22 +55,15 @@ impl GpuState {
             .copied()
             .find(|format| format.is_srgb())
             .or_else(|| capabilities.formats.first().copied())
-            .ok_or_else(|| {
-                "The GPU surface has no supported formats.".to_owned()
-            })?;
+            .ok_or_else(|| "The GPU surface has no supported formats.".to_owned())?;
 
-        let present_mode = if capabilities
-            .present_modes
-            .contains(&wgpu::PresentMode::Fifo)
-        {
+        let present_mode = if capabilities.present_modes.contains(&wgpu::PresentMode::Fifo) {
             wgpu::PresentMode::Fifo
         } else {
             *capabilities
                 .present_modes
                 .first()
-                .ok_or_else(|| {
-                    "The GPU surface has no present modes.".to_owned()
-                })?
+                .ok_or_else(|| "The GPU surface has no present modes.".to_owned())?
         };
 
         let alpha_mode = capabilities
@@ -79,12 +73,13 @@ impl GpuState {
             .unwrap_or(wgpu::CompositeAlphaMode::Auto);
 
         let size = window.inner_size();
+        let view_format = format.add_srgb_suffix();
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             color_space: wgpu::SurfaceColorSpace::Auto,
-            view_formats: vec![format.add_srgb_suffix()],
+            view_formats: vec![view_format],
             alpha_mode,
             width: size.width.max(1),
             height: size.height.max(1),
@@ -94,12 +89,15 @@ impl GpuState {
 
         surface.configure(&device, &config);
 
+        let ui = NexusUi::new(&device, view_format);
+
         Ok(Self {
             window,
             surface,
             device,
             queue,
             config,
+            ui,
         })
     }
 
@@ -110,41 +108,38 @@ impl GpuState {
 
         self.config.width = width;
         self.config.height = height;
-
         self.surface.configure(&self.device, &self.config);
+        self.window.request_redraw();
+    }
+
+    fn logical_size(&self) -> (f32, f32, f32) {
+        let scale = self.window.scale_factor() as f32;
+        let width = self.config.width as f32 / scale;
+        let height = self.config.height as f32 / scale;
+        (width, height, scale)
     }
 
     fn render(&mut self) {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 self.surface.configure(&self.device, &self.config);
                 frame
             }
-
             wgpu::CurrentSurfaceTexture::Timeout
-            | wgpu::CurrentSurfaceTexture::Occluded => {
-                return;
-            }
-
+            | wgpu::CurrentSurfaceTexture::Occluded => return,
             wgpu::CurrentSurfaceTexture::Outdated
             | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.device, &self.config);
                 return;
             }
-
-            wgpu::CurrentSurfaceTexture::Validation => {
-                return;
-            }
+            wgpu::CurrentSurfaceTexture::Validation => return,
         };
 
-        let view = frame.texture.create_view(
-            &wgpu::TextureViewDescriptor {
-                format: Some(self.config.format.add_srgb_suffix()),
-                ..Default::default()
-            },
-        );
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.config.format.add_srgb_suffix()),
+            ..Default::default()
+        });
 
         let mut encoder = self.device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
@@ -153,39 +148,52 @@ impl GpuState {
         );
 
         {
-            let _render_pass = encoder.begin_render_pass(
-                &wgpu::RenderPassDescriptor {
-                    label: Some("NexusClient Background Pass"),
-                    color_attachments: &[Some(
-                        wgpu::RenderPassColorAttachment {
-                            view: &view,
-                            depth_slice: None,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(
-                                    wgpu::Color {
-                                        r: 0.035,
-                                        g: 0.045,
-                                        b: 0.075,
-                                        a: 1.0,
-                                    },
-                                ),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        },
-                    )],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                },
-            );
+            let _background_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("NexusClient Background Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.035,
+                            g: 0.045,
+                            b: 0.075,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
         }
 
-        self.queue.submit([encoder.finish()]);
+        let (logical_width, logical_height, _) = self.logical_size();
 
+        self.ui.draw(
+            &self.device,
+            &mut encoder,
+            &view,
+            logical_width.max(1.0) as u32,
+            logical_height.max(1.0) as u32,
+        );
+
+        self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.queue.present(frame);
+    }
+
+    fn handle_touch(&mut self, x_physical: f64, y_physical: f64) {
+        let (width, height, scale) = self.logical_size();
+
+        let x = x_physical as f32 / scale;
+        let y = y_physical as f32 / scale;
+
+        self.ui.tap(x, y, width, height);
+        self.window.request_redraw();
     }
 }
 
@@ -212,18 +220,13 @@ impl ApplicationHandler for NexusGpuApp {
 
         let display = event_loop.owned_display_handle();
 
-        match pollster::block_on(
-            GpuState::new(display, window.clone()),
-        ) {
+        match pollster::block_on(GpuState::new(display, window.clone())) {
             Ok(state) => {
                 self.state = Some(state);
                 window.request_redraw();
             }
-
             Err(error) => {
-                eprintln!(
-                    "NexusClient GPU initialization failed: {error}"
-                );
+                eprintln!("NexusClient GPU initialization failed: {error}");
                 event_loop.exit();
             }
         }
@@ -244,12 +247,16 @@ impl ApplicationHandler for NexusGpuApp {
         };
 
         match event {
-            WindowEvent::CloseRequested => {
-                event_loop.exit();
-            }
+            WindowEvent::CloseRequested => event_loop.exit(),
 
             WindowEvent::Resized(size) => {
                 state.resize(size.width, size.height);
+            }
+
+            WindowEvent::Touch(touch) => {
+                if touch.phase == TouchPhase::Ended {
+                    state.handle_touch(touch.location.x, touch.location.y);
+                }
             }
 
             WindowEvent::RedrawRequested => {
@@ -276,9 +283,7 @@ pub fn run_desktop() {
 }
 
 #[cfg(target_os = "android")]
-pub fn run_android(
-    android_app: winit::platform::android::activity::AndroidApp,
-) {
+pub fn run_android(android_app: winit::platform::android::activity::AndroidApp) {
     use winit::platform::android::EventLoopBuilderExtAndroid;
 
     let mut builder = EventLoop::builder();
