@@ -44,6 +44,8 @@ jobs:
           test -x "$TOOLCHAIN/ld.lld"
           ln -sf "$TOOLCHAIN/ld.lld" "$TOOLCHAIN/aarch64-linux-android-ld"
 
+echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android21-clang" >> "$GITHUB_ENV"
+
       - name: Verify Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
