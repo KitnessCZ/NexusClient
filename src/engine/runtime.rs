@@ -1,61 +1,50 @@
 
-use super::{generate_test_world, Camera, Player, World};
+use super::{
+    generate_test_world, Camera, PhysicsInput, Player, PlayerPhysics, World,
+};
 
 /// Input supplied to one engine update.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EngineInput {
-    /// Positive moves forward; negative moves backward.
     pub forward: f32,
-
-    /// Positive moves right; negative moves left.
     pub right: f32,
-
-    /// Horizontal look change in radians.
     pub look_yaw: f32,
-
-    /// Vertical look change in radians.
     pub look_pitch: f32,
+    pub jump: bool,
 }
 
 /// Data produced after an engine update.
-///
-/// The renderer can consume this without depending on the engine's
-/// internal world or player implementation.
 #[derive(Clone, Copy, Debug)]
 pub struct EngineFrame {
     pub camera: Camera,
     pub delta_seconds: f32,
     pub elapsed_seconds: f64,
     pub frame_number: u64,
+    pub on_ground: bool,
 }
 
 /// Main runtime state for NexusClient.
 pub struct Engine {
     world: World,
     player: Player,
+    physics: PlayerPhysics,
     elapsed_seconds: f64,
     frame_number: u64,
 }
 
 impl Engine {
-    /// Creates an engine with a generated flat test world.
     pub fn new() -> Self {
         let mut world = World::new();
         generate_test_world(&mut world);
 
-        Self {
-            world,
-            player: Player::default(),
-            elapsed_seconds: 0.0,
-            frame_number: 0,
-        }
+        Self::with_world(world, Player::default())
     }
 
-    /// Creates an engine using an existing world and player.
     pub fn with_world(world: World, player: Player) -> Self {
         Self {
             world,
             player,
+            physics: PlayerPhysics::new(),
             elapsed_seconds: 0.0,
             frame_number: 0,
         }
@@ -77,6 +66,10 @@ impl Engine {
         &mut self.player
     }
 
+    pub fn physics(&self) -> &PlayerPhysics {
+        &self.physics
+    }
+
     pub fn elapsed_seconds(&self) -> f64 {
         self.elapsed_seconds
     }
@@ -85,10 +78,7 @@ impl Engine {
         self.frame_number
     }
 
-    /// Processes input and advances the engine by one frame.
-    ///
-    /// Invalid or non-positive frame times are ignored.
-    /// Large frame times are capped to avoid huge movement after pauses.
+    /// Processes input, physics, and timing for one frame.
     pub fn update(
         &mut self,
         input: EngineInput,
@@ -103,9 +93,14 @@ impl Engine {
         if delta > 0.0 {
             self.player.look(input.look_yaw, input.look_pitch);
 
-            self.player.move_local(
-                input.forward,
-                input.right,
+            self.physics.step(
+                &self.world,
+                &mut self.player,
+                PhysicsInput {
+                    forward: input.forward,
+                    right: input.right,
+                    jump: input.jump,
+                },
                 delta,
             );
 
@@ -118,12 +113,14 @@ impl Engine {
             delta_seconds: delta,
             elapsed_seconds: self.elapsed_seconds,
             frame_number: self.frame_number,
+            on_ground: self.physics.is_on_ground(),
         }
     }
 
-    /// Resets the player and engine timing without deleting the world.
+    /// Resets the player and timing without deleting the world.
     pub fn reset_player(&mut self, position: [f32; 3]) {
         self.player = Player::new(position);
+        self.physics.reset();
         self.elapsed_seconds = 0.0;
         self.frame_number = 0;
     }
@@ -166,6 +163,55 @@ mod tests {
         assert!(engine.player().position()[2] > 0.0);
         assert_eq!(frame.frame_number, 1);
         assert!(frame.elapsed_seconds > 0.0);
+    }
+
+    #[test]
+    fn engine_applies_gravity() {
+        let world = World::new();
+        let player = Player::new([0.0, 10.0, 0.0]);
+        let mut engine = Engine::with_world(world, player);
+
+        engine.update(EngineInput::default(), 1.0 / 60.0);
+
+        assert!(engine.player().position()[1] < 10.0);
+    }
+
+    #[test]
+    fn engine_detects_ground() {
+        let mut world = World::new();
+        world.set_block(0, 0, 0, BlockId::STONE);
+
+        let player = Player::new([0.0, 1.0, 0.0]);
+        let mut engine = Engine::with_world(world, player);
+
+        let frame = engine.update(
+            EngineInput::default(),
+            1.0 / 60.0,
+        );
+
+        assert!(frame.on_ground);
+    }
+
+    #[test]
+    fn engine_can_jump() {
+        let mut world = World::new();
+        world.set_block(0, 0, 0, BlockId::STONE);
+
+        let player = Player::new([0.0, 1.0, 0.0]);
+        let mut engine = Engine::with_world(world, player);
+
+        engine.update(EngineInput::default(), 1.0 / 60.0);
+
+        let frame = engine.update(
+            EngineInput {
+                jump: true,
+                ..EngineInput::default()
+            },
+            1.0 / 60.0,
+        );
+
+        assert!(engine.player().position()[1] > 1.0);
+        assert!(!frame.on_ground);
     }
 
     #[test]
@@ -214,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn reset_player_resets_timing() {
+    fn reset_player_resets_timing_and_physics() {
         let mut engine = Engine::new();
 
         engine.update(EngineInput::default(), 0.05);
@@ -223,5 +269,7 @@ mod tests {
         assert_eq!(engine.player().position(), [10.0, 3.0, 10.0]);
         assert_eq!(engine.elapsed_seconds(), 0.0);
         assert_eq!(engine.frame_number(), 0);
+        assert!(!engine.physics().is_on_ground());
+        assert_eq!(engine.physics().velocity_y(), 0.0);
     }
 }
