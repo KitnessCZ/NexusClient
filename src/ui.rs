@@ -9,6 +9,65 @@ struct UiVertex {
     color: [f32; 4],
 }
 
+#[derive(Clone, Copy)]
+struct UiLayout {
+    width: f32,
+    height: f32,
+    sidebar_width: f32,
+    margin: f32,
+    card_x: f32,
+    card_y: f32,
+    card_width: f32,
+    card_height: f32,
+    play_x: f32,
+    play_y: f32,
+    play_width: f32,
+    play_height: f32,
+    nav_y: f32,
+    nav_item_height: f32,
+}
+
+impl UiLayout {
+    fn new(width: f32, height: f32) -> Self {
+        let width = width.max(1.0);
+        let height = height.max(1.0);
+
+        let sidebar_width = (width * 0.20).clamp(136.0, 220.0);
+        let margin = 16.0;
+
+        let card_x = sidebar_width + margin;
+        let card_y = 52.0;
+        let card_width = (width - card_x - margin).max(1.0);
+        let card_height = (height - 126.0).max(150.0);
+
+        let play_x = card_x;
+        let play_y = height - 64.0;
+        let play_width = (card_width * 0.55).clamp(160.0, 260.0);
+        let play_height = 38.0;
+
+        Self {
+            width,
+            height,
+            sidebar_width,
+            margin,
+            card_x,
+            card_y,
+            card_width,
+            card_height,
+            play_x,
+            play_y,
+            play_width,
+            play_height,
+            nav_y: 100.0,
+            nav_item_height: 38.0,
+        }
+    }
+
+    fn sidebar_item_y(&self, index: usize) -> f32 {
+        self.nav_y + index as f32 * self.nav_item_height
+    }
+}
+
 pub struct NexusUi {
     pipeline: wgpu::RenderPipeline,
     screen: usize,
@@ -105,44 +164,52 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     pub fn tap(&mut self, x: f32, y: f32, width: f32, height: f32) {
-        let (nav_y, nav_height) = if width >= height {
-            (height * 0.5 - 24.0, 48.0)
-        } else {
-            (height - 76.0, 52.0)
-        };
+        let layout = UiLayout::new(width, height);
 
-        if width >= height {
-            let labels = 5;
-            let nav_width = (width - 48.0) / labels as f32;
+        // Sidebar Play button.
+        if x >= 10.0
+            && x <= layout.sidebar_width - 10.0
+            && y >= 56.0
+            && y <= 96.0
+        {
+            self.screen = 0;
+            self.notice = Some("GAME RUNTIME NOT READY YET".to_owned());
+            return;
+        }
 
-            if y >= nav_y && y <= nav_y + nav_height {
-                let index = ((x - 24.0) / nav_width).floor() as usize;
-                if index < labels {
-                    self.screen = index;
-                    self.notice = None;
-                    return;
-                }
-            }
-        } else if y >= nav_y && y <= nav_y + nav_height {
-            let nav_width = width / 5.0;
-            let index = (x / nav_width).floor() as usize;
-            if index < 5 {
+        // Sidebar navigation.
+        for index in 0..7 {
+            let item_y = layout.sidebar_item_y(index);
+
+            if x >= 10.0
+                && x <= layout.sidebar_width - 10.0
+                && y >= item_y
+                && y <= item_y + 32.0
+            {
                 self.screen = index;
                 self.notice = None;
                 return;
             }
         }
 
-        if self.screen == 0 {
-            let button_y = if width >= height {
-                height * 0.5 + 115.0
-            } else {
-                height * 0.5 + 110.0
-            };
+        // Main Play button.
+        if self.screen == 0
+            && x >= layout.play_x
+            && x <= layout.play_x + layout.play_width
+            && y >= layout.play_y
+            && y <= layout.play_y + layout.play_height
+        {
+            self.notice = Some("GAME RUNTIME NOT READY YET".to_owned());
+            return;
+        }
 
-            if y >= button_y && y <= button_y + 54.0 {
-                self.notice = Some("GAME RUNTIME NOT READY YET".to_owned());
-            }
+        // Top-right settings control.
+        if x >= layout.width - 58.0
+            && y >= 8.0
+            && y <= 48.0
+        {
+            self.screen = 5;
+            self.notice = None;
         }
     }
 
@@ -154,41 +221,66 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         width: u32,
         height: u32,
     ) {
-        let w = width.max(1) as f32;
-        let h = height.max(1) as f32;
+        let layout = UiLayout::new(width as f32, height as f32);
+        let w = layout.width;
+        let h = layout.height;
+
         let mut vertices = Vec::new();
 
-        let bg = [0.035, 0.043, 0.065, 1.0];
-        let panel = [0.075, 0.085, 0.12, 1.0];
-        let panel2 = [0.105, 0.12, 0.16, 1.0];
-        let accent = [0.25, 0.55, 1.0, 1.0];
-        let white = [0.92, 0.94, 0.98, 1.0];
-        let muted = [0.53, 0.58, 0.68, 1.0];
+        let background = [0.055, 0.045, 0.075, 1.0];
+        let sidebar = [0.045, 0.035, 0.060, 1.0];
+        let panel = [0.105, 0.085, 0.135, 1.0];
+        let panel_light = [0.145, 0.120, 0.175, 1.0];
+        let red = [0.90, 0.16, 0.20, 1.0];
+        let red_dark = [0.48, 0.075, 0.12, 1.0];
+        let white = [0.96, 0.94, 0.98, 1.0];
+        let muted = [0.62, 0.57, 0.68, 1.0];
+        let border = [0.19, 0.15, 0.22, 1.0];
 
-        rect(&mut vertices, 0.0, 0.0, w, h, bg, w, h);
-
-        let compact = w < h;
-        let margin = if compact { 18.0 } else { 30.0 };
-
-        // Header
+        // Background.
         rect(
             &mut vertices,
             0.0,
             0.0,
             w,
-            if compact { 82.0 } else { 76.0 },
-            [0.055, 0.065, 0.095, 1.0],
+            h,
+            background,
             w,
             h,
         );
 
+        // Left sidebar.
         rect(
             &mut vertices,
-            margin,
-            18.0,
-            40.0,
-            40.0,
-            accent,
+            0.0,
+            0.0,
+            layout.sidebar_width,
+            h,
+            sidebar,
+            w,
+            h,
+        );
+
+        // Sidebar divider.
+        rect(
+            &mut vertices,
+            layout.sidebar_width - 1.0,
+            48.0,
+            1.0,
+            h - 64.0,
+            border,
+            w,
+            h,
+        );
+
+        // Brand icon.
+        rect(
+            &mut vertices,
+            16.0,
+            12.0,
+            32.0,
+            32.0,
+            red,
             w,
             h,
         );
@@ -196,19 +288,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         text(
             &mut vertices,
             "N",
-            margin + 13.0,
-            25.0,
-            4.0,
-            white,
-            w,
-            h,
-        );
-
-        text(
-            &mut vertices,
-            "NEXUSCLIENT",
-            margin + 54.0,
-            20.0,
+            24.0,
+            18.0,
             3.0,
             white,
             w,
@@ -217,205 +298,259 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
         text(
             &mut vertices,
-            "ANDROID / JAVA",
-            margin + 55.0,
-            43.0,
-            1.5,
+            "NEXUSCLIENT",
+            56.0,
+            13.0,
+            1.8,
+            white,
+            w,
+            h,
+        );
+
+        text(
+            &mut vertices,
+            "ANDROID",
+            57.0,
+            29.0,
+            1.1,
             muted,
             w,
             h,
         );
 
-        // Navigation
-        let labels = ["HOME", "VERSIONS", "MODS", "PACKS", "SETTINGS"];
-        let nav_y = if compact { h - 76.0 } else { 96.0 };
-        let nav_height = 48.0;
-        let nav_width = (w - margin * 2.0) / labels.len() as f32;
+        // Sidebar Play button.
+        let play_selected = self.screen == 0;
+
+        rect(
+            &mut vertices,
+            10.0,
+            56.0,
+            layout.sidebar_width - 20.0,
+            40.0,
+            if play_selected { red_dark } else { panel },
+            w,
+            h,
+        );
+
+        rect(
+            &mut vertices,
+            22.0,
+            69.0,
+            10.0,
+            14.0,
+            white,
+            w,
+            h,
+        );
+
+        text(
+            &mut vertices,
+            "PLAY",
+            42.0,
+            70.0,
+            1.8,
+            white,
+            w,
+            h,
+        );
+
+        // Sidebar navigation.
+        let labels = [
+            "MODS",
+            "RESOURCE PACK",
+            "SHADERS",
+            "INSTALLED",
+            "SETTINGS",
+            "SKINS",
+        ];
+
+        let symbols = ["M", "R", "S", "I", "T", "K"];
 
         for (index, label) in labels.iter().enumerate() {
-            let x = margin + index as f32 * nav_width;
-            let selected = self.screen == index;
+            let item_y = layout.sidebar_item_y(index + 1);
+            let selected = self.screen == index + 1;
 
             if selected {
                 rect(
                     &mut vertices,
-                    x + 2.0,
-                    nav_y,
-                    nav_width - 4.0,
-                    nav_height,
-                    [0.10, 0.18, 0.31, 1.0],
+                    10.0,
+                    item_y,
+                    layout.sidebar_width - 20.0,
+                    32.0,
+                    panel,
                     w,
                     h,
                 );
+
                 rect(
                     &mut vertices,
-                    x + 2.0,
-                    nav_y,
+                    10.0,
+                    item_y,
                     3.0,
-                    nav_height,
-                    accent,
+                    32.0,
+                    red,
                     w,
                     h,
                 );
             }
 
-            let label_width = label.len() as f32 * 6.0 * 1.5;
+            text(
+                &mut vertices,
+                symbols[index],
+                22.0,
+                item_y + 10.0,
+                1.7,
+                if selected { red } else { muted },
+                w,
+                h,
+            );
+
             text(
                 &mut vertices,
                 label,
-                x + (nav_width - label_width) * 0.5,
-                nav_y + 18.0,
-                1.5,
+                42.0,
+                item_y + 11.0,
+                1.35,
                 if selected { white } else { muted },
                 w,
                 h,
             );
         }
 
+        // Top-right controls.
+        rect(
+            &mut vertices,
+            w - 104.0,
+            8.0,
+            38.0,
+            36.0,
+            panel,
+            w,
+            h,
+        );
+
+        text(
+            &mut vertices,
+            "T",
+            w - 91.0,
+            19.0,
+            2.0,
+            red,
+            w,
+            h,
+        );
+
+        rect(
+            &mut vertices,
+            w - 60.0,
+            8.0,
+            52.0,
+            36.0,
+            panel,
+            w,
+            h,
+        );
+
+        text(
+            &mut vertices,
+            "USER",
+            w - 53.0,
+            20.0,
+            1.2,
+            white,
+            w,
+            h,
+        );
+
+        // Main content card.
+        rect(
+            &mut vertices,
+            layout.card_x,
+            layout.card_y,
+            layout.card_width,
+            layout.card_height,
+            panel,
+            w,
+            h,
+        );
+
+        // Card border.
+        rect(
+            &mut vertices,
+            layout.card_x,
+            layout.card_y,
+            layout.card_width,
+            1.0,
+            border,
+            w,
+            h,
+        );
+
         if self.screen == 0 {
-            let content_top = if compact { 112.0 } else { 174.0 };
-            let card_y = content_top + 74.0;
-            let card_x = margin;
-            let card_width = w - margin * 2.0;
-            let card_height = if compact {
-                (h - card_y - 112.0).max(240.0)
-            } else {
-                (h - card_y - 50.0).max(260.0)
-            };
-
-            text(
+            self.draw_home(
                 &mut vertices,
-                "WELCOME BACK",
-                card_x,
-                content_top,
-                2.0,
-                accent,
+                &layout,
                 w,
                 h,
-            );
-
-            text(
-                &mut vertices,
-                "YOUR GAME STARTS HERE",
-                card_x,
-                content_top + 24.0,
-                3.0,
                 white,
-                w,
-                h,
-            );
-
-            rect(
-                &mut vertices,
-                card_x,
-                card_y,
-                card_width,
-                card_height,
-                panel,
-                w,
-                h,
-            );
-
-            rect(
-                &mut vertices,
-                card_x,
-                card_y,
-                4.0,
-                card_height,
-                accent,
-                w,
-                h,
-            );
-
-            text(
-                &mut vertices,
-                "READY WHEN YOU ARE",
-                card_x + 22.0,
-                card_y + 24.0,
-                2.0,
-                accent,
-                w,
-                h,
-            );
-
-            text(
-                &mut vertices,
-                "NEXUSCLIENT",
-                card_x + 22.0,
-                card_y + 58.0,
-                4.0,
-                white,
-                w,
-                h,
-            );
-
-            text(
-                &mut vertices,
-                "A MINECRAFT JAVA CLIENT BUILT IN RUST",
-                card_x + 22.0,
-                card_y + 94.0,
-                1.5,
                 muted,
+                red,
+                panel_light,
+            );
+        } else {
+            self.draw_section(
+                &mut vertices,
+                &layout,
                 w,
                 h,
+                white,
+                muted,
+                red,
+                panel_light,
             );
+        }
 
-            let info_y = card_y + 122.0;
-            let info_width = (card_width - 44.0).min(460.0);
-
+        // Main bottom Play button.
+        if self.screen == 0 {
             rect(
                 &mut vertices,
-                card_x + 22.0,
-                info_y,
-                info_width,
-                66.0,
-                panel2,
+                layout.play_x,
+                layout.play_y,
+                layout.play_width,
+                layout.play_height,
+                red,
                 w,
                 h,
             );
 
             text(
                 &mut vertices,
-                "CLIENT STATUS",
-                card_x + 36.0,
-                info_y + 12.0,
-                1.5,
-                accent,
-                w,
-                h,
-            );
-
-            text(
-                &mut vertices,
-                "FOUNDATION BUILD",
-                card_x + 36.0,
-                info_y + 34.0,
-                2.0,
+                "PLAY MINECRAFT",
+                layout.play_x + 18.0,
+                layout.play_y + 13.0,
+                1.7,
                 white,
                 w,
                 h,
             );
 
-            let button_y = card_y + card_height - 70.0;
-            let button_width = (card_width - 44.0).min(240.0);
-
             rect(
                 &mut vertices,
-                card_x + 22.0,
-                button_y,
-                button_width,
-                48.0,
-                accent,
+                layout.play_x + layout.play_width + 10.0,
+                layout.play_y,
+                104.0,
+                layout.play_height,
+                panel_light,
                 w,
                 h,
             );
 
             text(
                 &mut vertices,
-                "PLAY",
-                card_x + 22.0 + button_width * 0.5 - 12.0,
-                button_y + 17.0,
-                2.5,
+                "PROFILE 1",
+                layout.play_x + layout.play_width + 20.0,
+                layout.play_y + 13.0,
+                1.3,
                 white,
                 w,
                 h,
@@ -425,61 +560,14 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 text(
                     &mut vertices,
                     notice,
-                    card_x + 22.0,
-                    button_y + 60.0,
-                    1.5,
-                    accent,
-                    w,
-                    h,
-                );
-            } else {
-                text(
-                    &mut vertices,
-                    "GAME ENGINE IN DEVELOPMENT",
-                    card_x + 22.0,
-                    button_y + 60.0,
-                    1.5,
-                    muted,
+                    layout.card_x,
+                    h - 17.0,
+                    1.1,
+                    red,
                     w,
                     h,
                 );
             }
-        } else {
-            let titles = ["", "VERSIONS", "MODS", "RESOURCE PACKS", "SETTINGS"];
-            let title = titles[self.screen.min(4)];
-
-            text(
-                &mut vertices,
-                title,
-                margin,
-                if compact { 120.0 } else { 180.0 },
-                4.0,
-                white,
-                w,
-                h,
-            );
-
-            rect(
-                &mut vertices,
-                margin,
-                if compact { 170.0 } else { 230.0 },
-                w - margin * 2.0,
-                150.0,
-                panel,
-                w,
-                h,
-            );
-
-            text(
-                &mut vertices,
-                "COMING IN A FUTURE MILESTONE",
-                margin + 22.0,
-                if compact { 200.0 } else { 260.0 },
-                2.0,
-                accent,
-                w,
-                h,
-            );
         }
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -509,6 +597,194 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.draw(0..vertices.len() as u32, 0..1);
     }
+
+    fn draw_home(
+        &self,
+        vertices: &mut Vec<UiVertex>,
+        layout: &UiLayout,
+        w: f32,
+        h: f32,
+        white: [f32; 4],
+        muted: [f32; 4],
+        red: [f32; 4],
+        panel_light: [f32; 4],
+    ) {
+        let x = layout.card_x + 18.0;
+        let y = layout.card_y + 18.0;
+
+        text(
+            vertices,
+            "READY TO PLAY",
+            x,
+            y,
+            3.0,
+            white,
+            w,
+            h,
+        );
+
+        text(
+            vertices,
+            "MINECRAFT JAVA CLIENT",
+            x,
+            y + 30.0,
+            1.7,
+            muted,
+            w,
+            h,
+        );
+
+        text(
+            vertices,
+            "NEXUSCLIENT ENGINE",
+            x,
+            y + 68.0,
+            1.8,
+            white,
+            w,
+            h,
+        );
+
+        text(
+            vertices,
+            "RUST RENDERER / WGPU",
+            x,
+            y + 88.0,
+            1.4,
+            muted,
+            w,
+            h,
+        );
+
+        let notice_y = y + 116.0;
+        let notice_height = (layout.card_height - 140.0).max(38.0);
+
+        rect(
+            vertices,
+            x,
+            notice_y,
+            layout.card_width - 36.0,
+            notice_height.min(64.0),
+            panel_light,
+            w,
+            h,
+        );
+
+        rect(
+            vertices,
+            x,
+            notice_y,
+            3.0,
+            notice_height.min(64.0),
+            red,
+            w,
+            h,
+        );
+
+        text(
+            vertices,
+            "CLIENT STATUS",
+            x + 14.0,
+            notice_y + 12.0,
+            1.4,
+            red,
+            w,
+            h,
+        );
+
+        text(
+            vertices,
+            "FOUNDATION BUILD",
+            x + 14.0,
+            notice_y + 34.0,
+            1.7,
+            white,
+            w,
+            h,
+        );
+    }
+
+    fn draw_section(
+        &self,
+        vertices: &mut Vec<UiVertex>,
+        layout: &UiLayout,
+        w: f32,
+        h: f32,
+        white: [f32; 4],
+        muted: [f32; 4],
+        red: [f32; 4],
+        panel_light: [f32; 4],
+    ) {
+        let titles = [
+            "PLAY",
+            "MODS",
+            "RESOURCE PACKS",
+            "SHADERS",
+            "INSTALLED",
+            "SETTINGS",
+            "SKINS",
+        ];
+
+        let title = titles[self.screen.min(6)];
+
+        let x = layout.card_x + 18.0;
+        let y = layout.card_y + 22.0;
+
+        text(
+            vertices,
+            title,
+            x,
+            y,
+            3.0,
+            white,
+            w,
+            h,
+        );
+
+        rect(
+            vertices,
+            x,
+            y + 54.0,
+            layout.card_width - 36.0,
+            100.0,
+            panel_light,
+            w,
+            h,
+        );
+
+        rect(
+            vertices,
+            x,
+            y + 54.0,
+            3.0,
+            100.0,
+            red,
+            w,
+            h,
+        );
+
+        text(
+            vertices,
+            "COMING SOON",
+            x + 16.0,
+            y + 72.0,
+            2.0,
+            red,
+            w,
+            h,
+        );
+
+        text(
+            vertices,
+            "THIS SECTION IS UNDER DEVELOPMENT",
+            x + 16.0,
+            y + 102.0,
+            1.4,
+            muted,
+            w,
+            h,
+        );
+    }
 }
 
 fn rect(
@@ -521,15 +797,31 @@ fn rect(
     screen_width: f32,
     screen_height: f32,
 ) {
+    if width <= 0.0 || height <= 0.0 {
+        return;
+    }
+
     let x1 = x / screen_width * 2.0 - 1.0;
     let x2 = (x + width) / screen_width * 2.0 - 1.0;
     let y1 = 1.0 - y / screen_height * 2.0;
     let y2 = 1.0 - (y + height) / screen_height * 2.0;
 
-    let a = UiVertex { position: [x1, y1], color };
-    let b = UiVertex { position: [x2, y1], color };
-    let c = UiVertex { position: [x2, y2], color };
-    let d = UiVertex { position: [x1, y2], color };
+    let a = UiVertex {
+        position: [x1, y1],
+        color,
+    };
+    let b = UiVertex {
+        position: [x2, y1],
+        color,
+    };
+    let c = UiVertex {
+        position: [x2, y2],
+        color,
+    };
+    let d = UiVertex {
+        position: [x1, y2],
+        color,
+    };
 
     vertices.extend_from_slice(&[a, b, c, a, c, d]);
 }
@@ -547,8 +839,9 @@ fn text(
     let mut cursor = x;
 
     for character in value.chars() {
-        let glyph = glyph(character);
-        for (row, bits) in glyph.iter().enumerate() {
+        let bitmap = glyph(character);
+
+        for (row, bits) in bitmap.iter().enumerate() {
             for column in 0..5 {
                 if bits & (1 << (4 - column)) != 0 {
                     rect(
@@ -564,6 +857,7 @@ fn text(
                 }
             }
         }
+
         cursor += 6.0 * scale;
     }
 }
