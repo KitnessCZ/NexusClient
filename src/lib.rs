@@ -1,6 +1,7 @@
 
 pub mod engine;
 pub mod theme;
+pub mod minecraft;
 
 mod gpu_app;
 mod ui;
