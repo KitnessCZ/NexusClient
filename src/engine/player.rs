@@ -1,5 +1,5 @@
 
-use std::f32::consts::{FRAC_PI_2, PI, TAU};
+use std::f32::consts::{FRAC_PI_2, TAU};
 
 const MAX_PITCH: f32 = FRAC_PI_2 - 0.01;
 
