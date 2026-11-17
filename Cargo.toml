@@ -15,9 +15,9 @@ package_name = "com.nexusclient.app"
 label = "NexusClient"
 build_targets = ["aarch64-linux-android"]
 assets = "assets/"
-android_version = 29
+android_version = 36
 min_sdk_version = 21
-target_sdk_version = 29
+target_sdk_version = 36
 fullscreen = false
 
 [package.metadata.android.activity_attributes]
