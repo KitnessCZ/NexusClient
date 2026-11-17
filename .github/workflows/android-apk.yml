@@ -1,0 +1,33 @@
+name: Build NexusClient APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build ARM64 APK with Macroquad Android toolchain
+        run: |
+          docker pull notfl3/cargo-apk
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/root/src" \
+            -w /root/src \
+            notfl3/cargo-apk \
+            cargo quad-apk build --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NexusClient-Android-ARM64
+          path: target/android-artifacts/release/apk/*.apk
+          if-no-files-found: error
+          retention-days: 14
