@@ -33,9 +33,10 @@ jobs:
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
 
-          TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
-          ln -sf llvm-ar "$TOOLCHAIN/bin/aarch64-linux-android-ar"
-          test -x "$TOOLCHAIN/bin/aarch64-linux-android-ar"
+          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+          test -x "$TOOLCHAIN/llvm-ar"
+          ln -sf "$TOOLCHAIN/llvm-ar" "$TOOLCHAIN/aarch64-linux-android-ar"
 
       - name: Verify Android SDK
         run: |
