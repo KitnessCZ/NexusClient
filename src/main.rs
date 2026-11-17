@@ -1,4 +1,5 @@
 mod app;
+mod engine;
 mod theme;
 
 use macroquad::prelude::*;
