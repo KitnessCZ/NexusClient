@@ -1,7 +1,7 @@
 
 use super::{BlockId, World};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BlockHit {
     pub block_position: [i32; 3],
     pub previous_position: [i32; 3],
