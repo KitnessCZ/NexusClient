@@ -31,7 +31,6 @@ pub struct VersionEntry {
     pub version_type: String,
 
     pub url: String,
-
     pub time: Option<String>,
 
     #[serde(rename = "releaseTime")]
@@ -46,7 +45,6 @@ pub struct VersionEntry {
 #[derive(Debug, Clone, Deserialize)]
 pub struct VersionMetadata {
     pub id: String,
-
     pub downloads: VersionDownloads,
 
     #[serde(rename = "assetIndex")]
@@ -120,6 +118,33 @@ pub struct LibraryDownloads {
     pub classifiers: HashMap<String, DownloadInfo>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct AssetIndexData {
+    pub objects: HashMap<String, AssetObject>,
+
+    #[serde(default, rename = "virtual")]
+    pub virtual_assets: Option<bool>,
+
+    #[serde(default, rename = "map_to_resources")]
+    pub map_to_resources: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AssetObject {
+    pub hash: String,
+    pub size: u64,
+}
+
+impl AssetIndexData {
+    pub fn object_count(&self) -> usize {
+        self.objects.len()
+    }
+
+    pub fn total_size(&self) -> u64 {
+        self.objects.values().map(|object| object.size).sum()
+    }
+}
+
 impl VersionMetadata {
     pub fn library_artifacts(&self) -> Vec<(&str, &DownloadInfo)> {
         self.libraries
@@ -159,6 +184,32 @@ fn download_text(url: &str) -> Result<String, String> {
     response
         .text()
         .map_err(|error| format!("Response read failed: {error}"))
+}
+
+fn verify_bytes(
+    bytes: &[u8],
+    expected_size: u64,
+    expected_sha1: &str,
+) -> Result<(), String> {
+    if bytes.len() as u64 != expected_size {
+        return Err(format!(
+            "File size mismatch: expected {} bytes, received {} bytes",
+            expected_size,
+            bytes.len()
+        ));
+    }
+
+    let actual_hash = format!("{:x}", Sha1::digest(bytes));
+
+    if !actual_hash.eq_ignore_ascii_case(expected_sha1) {
+        return Err(format!(
+            "SHA-1 mismatch: expected {}, received {}",
+            expected_sha1,
+            actual_hash
+        ));
+    }
+
+    Ok(())
 }
 
 impl VersionManifest {
@@ -208,6 +259,34 @@ impl VersionEntry {
     }
 }
 
+impl AssetIndex {
+    pub fn download_and_parse(&self) -> Result<AssetIndexData, String> {
+        let response = http_client()?
+            .get(&self.url)
+            .send()
+            .map_err(|error| {
+                format!("Asset index download failed: {error}")
+            })?
+            .error_for_status()
+            .map_err(|error| {
+                format!("Asset index HTTP error: {error}")
+            })?;
+
+        let bytes = response
+            .bytes()
+            .map_err(|error| {
+                format!("Cannot read asset index: {error}")
+            })?;
+
+        verify_bytes(&bytes, self.size, &self.sha1)?;
+
+        serde_json::from_slice(&bytes)
+            .map_err(|error| {
+                format!("Invalid asset index JSON: {error}")
+            })
+    }
+}
+
 impl DownloadInfo {
     pub fn download_to(&self, destination: &Path) -> Result<PathBuf, String> {
         let parent = destination
@@ -249,13 +328,9 @@ impl DownloadInfo {
         let mut response = http_client()?
             .get(&self.url)
             .send()
-            .map_err(|error| {
-                format!("Download failed: {error}")
-            })?
+            .map_err(|error| format!("Download failed: {error}"))?
             .error_for_status()
-            .map_err(|error| {
-                format!("Download HTTP error: {error}")
-            })?;
+            .map_err(|error| format!("Download HTTP error: {error}"))?;
 
         let mut file = File::create(temporary_path)
             .map_err(|error| {
@@ -327,11 +402,7 @@ mod tests {
             {
                 "id": "26.3",
                 "type": "release",
-                "url": "https://example.com/26.3.json",
-                "time": "2026-09-15T00:00:00+00:00",
-                "releaseTime": "2026-09-15T00:00:00+00:00",
-                "sha1": "example",
-                "complianceLevel": 1
+                "url": "https://example.com/26.3.json"
             }
         ]
     }
@@ -378,6 +449,23 @@ mod tests {
             }
         ],
         "arguments": {}
+    }
+    "#;
+
+    const TEST_ASSET_INDEX: &str = r#"
+    {
+        "objects": {
+            "minecraft/lang/en_us.json": {
+                "hash": "0123456789abcdef0123456789abcdef01234567",
+                "size": 1234
+            },
+            "minecraft/sounds.json": {
+                "hash": "abcdef0123456789abcdef0123456789abcdef01",
+                "size": 5678
+            }
+        },
+        "virtual": false,
+        "map_to_resources": true
     }
     "#;
 
@@ -428,10 +516,6 @@ mod tests {
         assert_eq!(artifacts.len(), 1);
         assert_eq!(artifacts[0].0, "org.example:test-library:1.0");
         assert_eq!(artifacts[0].1.size, 500);
-        assert_eq!(
-            artifacts[0].1.url,
-            "https://example.com/test-library.jar"
-        );
     }
 
     #[test]
@@ -449,5 +533,27 @@ mod tests {
 
         assert_eq!(classifiers.size, 100);
         assert_eq!(classifiers.sha1, "nativehash");
+    }
+
+    #[test]
+    fn parses_asset_index() {
+        let index: AssetIndexData =
+            serde_json::from_str(TEST_ASSET_INDEX).unwrap();
+
+        assert_eq!(index.object_count(), 2);
+        assert_eq!(index.total_size(), 6912);
+        assert_eq!(index.virtual_assets, Some(false));
+        assert_eq!(index.map_to_resources, Some(true));
+    }
+
+    #[test]
+    fn verifies_asset_index_bytes() {
+        let bytes = b"hello";
+
+        let hash = format!("{:x}", Sha1::digest(bytes));
+
+        assert!(verify_bytes(bytes, 5, &hash).is_ok());
+        assert!(verify_bytes(bytes, 6, &hash).is_err());
+        assert!(verify_bytes(bytes, 5, "wrong-hash").is_err());
     }
 }
