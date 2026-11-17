@@ -38,6 +38,72 @@ pub struct VersionEntry {
     pub compliance_level: Option<u32>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct VersionMetadata {
+    pub id: String,
+
+    pub downloads: VersionDownloads,
+
+    #[serde(rename = "assetIndex")]
+    pub asset_index: AssetIndex,
+
+    #[serde(rename = "javaVersion")]
+    pub java_version: JavaVersion,
+
+    #[serde(default)]
+    pub libraries: Vec<serde_json::Value>,
+
+    #[serde(default)]
+    pub arguments: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VersionDownloads {
+    pub client: DownloadInfo,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DownloadInfo {
+    pub sha1: String,
+    pub size: u64,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AssetIndex {
+    pub id: String,
+    pub sha1: String,
+    pub size: u64,
+    #[serde(rename = "totalSize")]
+    pub total_size: Option<u64>,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct JavaVersion {
+    pub component: String,
+    #[serde(rename = "majorVersion")]
+    pub major_version: u32,
+}
+
+fn download_text(url: &str) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("NexusClient/0.1.0")
+        .build()
+        .map_err(|error| format!("HTTP client error: {error}"))?;
+
+    let response = client
+        .get(url)
+        .send()
+        .map_err(|error| format!("Download failed: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("HTTP error: {error}"))?;
+
+    response
+        .text()
+        .map_err(|error| format!("Response read failed: {error}"))
+}
+
 impl VersionManifest {
     pub fn parse(json: &str) -> Result<Self, String> {
         serde_json::from_str(json)
@@ -45,20 +111,7 @@ impl VersionManifest {
     }
 
     pub fn download() -> Result<Self, String> {
-        let response = reqwest::blocking::Client::builder()
-            .user_agent("NexusClient/0.1.0")
-            .build()
-            .map_err(|error| format!("HTTP client error: {error}"))?
-            .get(VERSION_MANIFEST_URL)
-            .send()
-            .map_err(|error| format!("Manifest download failed: {error}"))?
-            .error_for_status()
-            .map_err(|error| format!("Mojang HTTP error: {error}"))?;
-
-        let body = response
-            .text()
-            .map_err(|error| format!("Manifest read failed: {error}"))?;
-
+        let body = download_text(VERSION_MANIFEST_URL)?;
         Self::parse(&body)
     }
 
@@ -75,6 +128,24 @@ impl VersionManifest {
 
     pub fn target_release(&self) -> Result<&VersionEntry, String> {
         self.find_version(TARGET_VERSION)
+    }
+}
+
+impl VersionEntry {
+    pub fn download_metadata(&self) -> Result<VersionMetadata, String> {
+        let body = download_text(&self.url)?;
+
+        let metadata: VersionMetadata = serde_json::from_str(&body)
+            .map_err(|error| format!("Invalid metadata for {}: {error}", self.id))?;
+
+        if metadata.id != self.id {
+            return Err(format!(
+                "Version mismatch: expected {}, received {}",
+                self.id, metadata.id
+            ));
+        }
+
+        Ok(metadata)
     }
 }
 
@@ -102,6 +173,32 @@ mod tests {
     }
     "#;
 
+    const TEST_METADATA: &str = r#"
+    {
+        "id": "26.3",
+        "downloads": {
+            "client": {
+                "sha1": "clienthash",
+                "size": 1000,
+                "url": "https://example.com/client.jar"
+            }
+        },
+        "assetIndex": {
+            "id": "34",
+            "sha1": "assethash",
+            "size": 2000,
+            "totalSize": 3000,
+            "url": "https://example.com/assets.json"
+        },
+        "javaVersion": {
+            "component": "java-runtime-epsilon",
+            "majorVersion": 25
+        },
+        "libraries": [],
+        "arguments": {}
+    }
+    "#;
+
     #[test]
     fn parses_manifest() {
         let manifest = VersionManifest::parse(TEST_MANIFEST).unwrap();
@@ -124,5 +221,21 @@ mod tests {
         let manifest = VersionManifest::parse(TEST_MANIFEST).unwrap();
 
         assert!(manifest.find_version("1.8.9").is_err());
+    }
+
+    #[test]
+    fn parses_version_metadata() {
+        let metadata: VersionMetadata =
+            serde_json::from_str(TEST_METADATA).unwrap();
+
+        assert_eq!(metadata.id, "26.3");
+        assert_eq!(metadata.downloads.client.sha1, "clienthash");
+        assert_eq!(metadata.downloads.client.size, 1000);
+        assert_eq!(metadata.asset_index.id, "34");
+        assert_eq!(metadata.java_version.major_version, 25);
+        assert_eq!(
+            metadata.java_version.component,
+            "java-runtime-epsilon"
+        );
     }
 }
