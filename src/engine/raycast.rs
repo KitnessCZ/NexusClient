@@ -52,7 +52,7 @@ pub fn raycast(
         sign(direction[2]),
     ];
 
-    let mut t_delta = [
+    let t_delta = [
         axis_delta(direction[0]),
         axis_delta(direction[1]),
         axis_delta(direction[2]),
