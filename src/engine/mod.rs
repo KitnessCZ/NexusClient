@@ -1,6 +1,7 @@
 
 mod block;
 mod chunk;
+mod gpu_camera;
 mod gpu_mesh;
 mod gpu_renderer;
 mod gpu_vertex;
@@ -14,6 +15,7 @@ mod world;
 
 pub use block::BlockId;
 pub use chunk::{Chunk, ChunkPos, ChunkSection, SECTION_VOLUME};
+pub use gpu_camera::GpuCamera;
 pub use gpu_mesh::GpuChunkMesh;
 pub use gpu_renderer::BlockRenderPipeline;
 pub use gpu_vertex::{convert_vertices, vertices_as_bytes, GpuVertex};
