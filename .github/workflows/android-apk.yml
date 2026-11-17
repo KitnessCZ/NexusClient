@@ -1,118 +1,65 @@
 
-name: Build NexusClient APK
+name: Build NexusClient with Horizon
 
 on:
   push:
     branches:
-      - main
-      - wgpu-migration
+      - horizon-native-engine
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-  NDK_VERSION: "28.2.13676358"
+permissions:
+  contents: read
 
 jobs:
   android:
-    name: Build Android ARM64 APK
+    name: Build Horizon Android engine
     runs-on: ubuntu-24.04
+    timeout-minutes: 150
 
     steps:
-      - name: Checkout repository
+      - name: Checkout NexusClient and Starling submodule
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: Install Java
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Java 25
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "25"
 
       - name: Install Android SDK and NDK
         uses: android-actions/setup-android@v3
         with:
-          packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;28.2.13676358"
+          packages: "build-tools;35.0.0 platforms;android-36 ndk;28.2.13676358"
 
-      - name: Configure Android environment
+      - name: Install Rust and Android target
         shell: bash
         run: |
           set -euo pipefail
-
-          NDK_PATH="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
-
-          test -d "$NDK_PATH"
-          test -f "$ANDROID_SDK_ROOT/platforms/android-35/android.jar"
-
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
-          echo "NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
-
-      - name: Install Rust
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          rustup toolchain install 1.95.0 --profile minimal
-          rustup default 1.95.0
+          rustup toolchain install stable --profile minimal --target aarch64-linux-android
+          rustup default stable
           rustup target add aarch64-linux-android
+          cargo install cargo-ndk --version 3.5.4 --locked
 
-          rustc --version
-          cargo --version
-
-      - name: Install cargo-apk2
-        run: cargo +1.95.0 install --locked cargo-apk2
-
-      - name: Generate temporary APK signing key
+      - name: Build Horizon Android APK
         shell: bash
         run: |
           set -euo pipefail
+          python3 vendor/starling/packaging/android/build_apk.py \
+            --abi arm64-v8a \
+            --profile quick \
+            --preview
 
-          KEYSTORE="$RUNNER_TEMP/nexusclient-release.keystore"
-          PASSWORD="NexusClientTemporaryBuildKey2026"
-
-          keytool -genkeypair \
-            -keystore "$KEYSTORE" \
-            -storepass "$PASSWORD" \
-            -keypass "$PASSWORD" \
-            -alias nexusclient \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=NexusClient, OU=Development, O=NexusClient, L=Prague, ST=Prague, C=CZ"
-
-          echo "CARGO_APK_RELEASE_KEYSTORE=$KEYSTORE" >> "$GITHUB_ENV"
-          echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
-
-      - name: Build NexusClient APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo apk2 build --release
-
-      - name: Verify APK
-        id: verify_apk
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APK="$(find target -type f -name '*.apk' \
-            ! -name '*unaligned.apk' \
-            -print -quit)"
-
-          if [ -z "$APK" ]; then
-            echo "::error::No APK was generated."
-            find target -type f -print || true
-            exit 1
-          fi
-
-          echo "APK successfully generated:"
-          ls -lh "$APK"
-
-          echo "apk_path=$APK" >> "$GITHUB_OUTPUT"
-
-      - name: Upload NexusClient APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NexusClient-WGPU-Android-ARM64
-          path: ${{ steps.verify_apk.outputs.apk_path }}
+          name: NexusClient-Horizon-ARM64
+          path: vendor/starling/target/android/starling-preview-*.apk
           if-no-files-found: error
           retention-days: 14
