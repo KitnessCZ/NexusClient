@@ -69,11 +69,11 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Install cargo-quad-apk
+            - name: Install cargo-quad-apk
         run: |
           cargo +1.95.0 install --locked \
-  --git https://github.com/hoklims/cargo-quad-apk \
-  cargo-quad-apk
+            --git https://github.com/hoklims/cargo-quad-apk \
+            cargo-quad-apk
 
       - name: Build NexusClient APK
         shell: bash
