@@ -1,33 +1,55 @@
+
 name: Build NexusClient APK
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ "main" ]
-
-permissions:
-  contents: read
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  build-android:
-    runs-on: ubuntu-latest
+  android:
+    runs-on: ubuntu-24.04
+
     steps:
-      - name: Check out source
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build ARM64 APK with Macroquad Android toolchain
-        run: |
-          docker pull notfl3/cargo-apk
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE:/root/src" \
-            -w /root/src \
-            notfl3/cargo-apk \
-            cargo quad-apk build --release
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
-      - name: Upload APK artifact
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform and NDK
+        run: |
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-36"
+          sdkmanager "build-tools;36.0.0"
+          sdkmanager "ndk;27.2.12479018"
+
+      - name: Verify Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
+          echo "android.jar found"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install cargo-quad-apk
+        run: cargo install cargo-quad-apk
+
+      - name: Build APK
+        run: cargo quad-apk build --release
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: NexusClient-Android-ARM64
           path: target/android-artifacts/release/apk/*.apk
           if-no-files-found: error
-          retention-days: 14
