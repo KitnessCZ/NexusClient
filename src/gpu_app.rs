@@ -1,3 +1,4 @@
+
 use std::sync::Arc;
 
 use winit::{
@@ -8,7 +9,6 @@ use winit::{
 };
 
 struct GpuState {
-    instance: wgpu::Instance,
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -54,7 +54,9 @@ impl GpuState {
             .copied()
             .find(|format| format.is_srgb())
             .or_else(|| capabilities.formats.first().copied())
-            .ok_or_else(|| "The GPU surface has no supported formats.".to_owned())?;
+            .ok_or_else(|| {
+                "The GPU surface has no supported formats.".to_owned()
+            })?;
 
         let present_mode = if capabilities
             .present_modes
@@ -65,7 +67,9 @@ impl GpuState {
             *capabilities
                 .present_modes
                 .first()
-                .ok_or_else(|| "The GPU surface has no present modes.".to_owned())?
+                .ok_or_else(|| {
+                    "The GPU surface has no present modes.".to_owned()
+                })?
         };
 
         let alpha_mode = capabilities
@@ -91,7 +95,6 @@ impl GpuState {
         surface.configure(&device, &config);
 
         Ok(Self {
-            instance,
             window,
             surface,
             device,
@@ -209,14 +212,18 @@ impl ApplicationHandler for NexusGpuApp {
 
         let display = event_loop.owned_display_handle();
 
-        match pollster::block_on(GpuState::new(display, window.clone())) {
+        match pollster::block_on(
+            GpuState::new(display, window.clone()),
+        ) {
             Ok(state) => {
                 self.state = Some(state);
                 window.request_redraw();
             }
 
             Err(error) => {
-                eprintln!("NexusClient GPU initialization failed: {error}");
+                eprintln!(
+                    "NexusClient GPU initialization failed: {error}"
+                );
                 event_loop.exit();
             }
         }
