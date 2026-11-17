@@ -23,6 +23,7 @@ jobs:
       - name: Install Android SDK
         uses: android-actions/setup-android@v4
 
+      
       - name: Install Android platform and NDK
         run: |
           sdkmanager "platform-tools"
@@ -30,11 +31,13 @@ jobs:
           sdkmanager "build-tools;36.0.0"
           sdkmanager "ndk;27.2.12479018"
 
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
+          NDK_PATH="$ANDROID_HOME/ndk/27.2.12479018"
+          echo "NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
 
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
+          ls -la "$TOOLCHAIN"
           test -x "$TOOLCHAIN/llvm-ar"
           ln -sf "$TOOLCHAIN/llvm-ar" "$TOOLCHAIN/aarch64-linux-android-ar"
 
