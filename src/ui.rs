@@ -66,11 +66,11 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 module: &shader,
                 entry_point: Some("vertex_main"),
                 compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<UiVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &attributes,
-                }],
+                })],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
