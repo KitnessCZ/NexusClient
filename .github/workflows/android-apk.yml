@@ -3,15 +3,21 @@ name: Build NexusClient APK
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  NDK_VERSION: "28.2.13676358"
 
 jobs:
   android:
+    name: Build Android ARM64 APK
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Java
@@ -20,52 +26,88 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Android SDK
-        uses: android-actions/setup-android@v4
-
-      
-      - name: Install Android platform and NDK
-        run: |
-          sdkmanager "platform-tools"
-          sdkmanager "platforms;android-36"
-          sdkmanager "build-tools;36.0.0"
-          sdkmanager "ndk;27.2.12479018"
-
-          NDK_PATH="$ANDROID_HOME/ndk/27.2.12479018"
-          echo "NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
-
-          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
-
-          ls -la "$TOOLCHAIN"
-          test -x "$TOOLCHAIN/llvm-ar"
-          ln -sf "$TOOLCHAIN/llvm-ar" "$TOOLCHAIN/aarch64-linux-android-ar"
-
-          test -x "$TOOLCHAIN/ld.lld"
-          ln -sf "$TOOLCHAIN/ld.lld" "$TOOLCHAIN/aarch64-linux-android-ld"
-
-          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android21-clang" >> "$GITHUB_ENV"
-
-      - name: Verify Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
-          echo "android.jar found"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Android SDK and NDK
+        uses: android-actions/setup-android@v3
         with:
-          targets: aarch64-linux-android
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;28.2.13676358"
+
+      - name: Configure Android environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NDK_PATH="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
+
+          test -d "$NDK_PATH"
+          test -f "$ANDROID_SDK_ROOT/platforms/android-35/android.jar"
+          test -x "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+
+          echo "Android SDK and NDK verified."
+
+      - name: Install required system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip unzip
+
+      - name: Install Rust 1.95.0
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+
+          rustup target add \
+            aarch64-linux-android \
+            armv7-linux-androideabi \
+            i686-linux-android
+
+          rustc --version
+          cargo --version
 
       - name: Install cargo-quad-apk
-        run: cargo install cargo-quad-apk
+        run: |
+          cargo +1.95.0 install --locked --git https://github.com/hoklims/cargo-quad-apk
 
-      - name: Build APK
-        run: cargo quad-apk build --release
+      - name: Build NexusClient APK
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      - name: Upload APK
+          cargo quad-apk build --release
+
+      - name: Verify APK
+        id: verify_apk
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="$(find target/android-artifacts/release/apk \
+            -maxdepth 1 \
+            -type f \
+            -name '*.apk' \
+            ! -name '*_unaligned.apk' \
+            -print -quit)"
+
+          if [ -z "$APK" ]; then
+            echo "::error::No final APK was generated."
+            find target/android-artifacts -type f -print || true
+            exit 1
+          fi
+
+          echo "APK successfully generated:"
+          ls -lh "$APK"
+
+          echo "apk_path=$APK" >> "$GITHUB_OUTPUT"
+
+      - name: Upload NexusClient APK
         uses: actions/upload-artifact@v4
         with:
           name: NexusClient-Android-ARM64
-          path: target/android-artifacts/release/apk/*.apk
+          path: ${{ steps.verify_apk.outputs.apk_path }}
           if-no-files-found: error
+          retention-days: 14
