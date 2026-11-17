@@ -5,10 +5,20 @@ version = "0.1.0"
 edition = "2021"
 description = "NexusClient - a Rust-based Minecraft Java client foundation"
 license = "MIT"
+autobins = false
+
+[features]
+default = []
+desktop = []
 
 [lib]
 name = "nexusclient"
 crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "nexusclient-desktop"
+path = "src/main.rs"
+required-features = ["desktop"]
 
 [dependencies]
 wgpu = { version = "30.0.2", default-features = false, features = ["std", "vulkan", "gles", "wgsl"] }
