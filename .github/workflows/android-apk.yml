@@ -71,13 +71,14 @@ jobs:
 
       - name: Install cargo-quad-apk
         run: |
-          cargo +1.95.0 install --locked --git https://github.com/hoklims/cargo-quad-apk
+          cargo +1.95.0 install --locked \
+            --git https://github.com/hoklims/cargo-quad-apk \
+            --package cargo-quad-apk
 
       - name: Build NexusClient APK
         shell: bash
         run: |
           set -euo pipefail
-
           cargo quad-apk build --release
 
       - name: Verify APK
