@@ -1,6 +1,7 @@
 
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -45,6 +46,7 @@ pub struct VersionEntry {
 #[derive(Debug, Clone, Deserialize)]
 pub struct VersionMetadata {
     pub id: String,
+
     pub downloads: VersionDownloads,
 
     #[serde(rename = "assetIndex")]
@@ -54,7 +56,7 @@ pub struct VersionMetadata {
     pub java_version: JavaVersion,
 
     #[serde(default)]
-    pub libraries: Vec<serde_json::Value>,
+    pub libraries: Vec<LibraryEntry>,
 
     #[serde(default)]
     pub arguments: Option<serde_json::Value>,
@@ -90,6 +92,53 @@ pub struct JavaVersion {
 
     #[serde(rename = "majorVersion")]
     pub major_version: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LibraryEntry {
+    pub name: String,
+
+    #[serde(default)]
+    pub downloads: Option<LibraryDownloads>,
+
+    #[serde(default)]
+    pub url: Option<String>,
+
+    #[serde(default)]
+    pub rules: Vec<serde_json::Value>,
+
+    #[serde(default)]
+    pub natives: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LibraryDownloads {
+    #[serde(default)]
+    pub artifact: Option<DownloadInfo>,
+
+    #[serde(default)]
+    pub classifiers: HashMap<String, DownloadInfo>,
+}
+
+impl VersionMetadata {
+    pub fn library_artifacts(&self) -> Vec<(&str, &DownloadInfo)> {
+        self.libraries
+            .iter()
+            .filter_map(|library| {
+                let artifact = library
+                    .downloads
+                    .as_ref()?
+                    .artifact
+                    .as_ref()?;
+
+                Some((library.name.as_str(), artifact))
+            })
+            .collect()
+    }
+
+    pub fn library_count(&self) -> usize {
+        self.libraries.len()
+    }
 }
 
 fn http_client() -> Result<reqwest::blocking::Client, String> {
@@ -167,7 +216,9 @@ impl DownloadInfo {
             .unwrap_or_else(|| Path::new("."));
 
         fs::create_dir_all(parent)
-            .map_err(|error| format!("Cannot create download directory: {error}"))?;
+            .map_err(|error| {
+                format!("Cannot create download directory: {error}")
+            })?;
 
         let file_name = destination
             .file_name()
@@ -177,9 +228,7 @@ impl DownloadInfo {
         let temporary_path =
             destination.with_file_name(format!("{file_name}.part"));
 
-        let result = self.download_and_verify(&temporary_path);
-
-        if let Err(error) = result {
+        if let Err(error) = self.download_and_verify(&temporary_path) {
             let _ = fs::remove_file(&temporary_path);
             return Err(error);
         }
@@ -193,16 +242,25 @@ impl DownloadInfo {
         Ok(destination.to_path_buf())
     }
 
-    fn download_and_verify(&self, temporary_path: &Path) -> Result<(), String> {
+    fn download_and_verify(
+        &self,
+        temporary_path: &Path,
+    ) -> Result<(), String> {
         let mut response = http_client()?
             .get(&self.url)
             .send()
-            .map_err(|error| format!("Client JAR download failed: {error}"))?
+            .map_err(|error| {
+                format!("Download failed: {error}")
+            })?
             .error_for_status()
-            .map_err(|error| format!("Client JAR HTTP error: {error}"))?;
+            .map_err(|error| {
+                format!("Download HTTP error: {error}")
+            })?;
 
         let mut file = File::create(temporary_path)
-            .map_err(|error| format!("Cannot create temporary JAR: {error}"))?;
+            .map_err(|error| {
+                format!("Cannot create temporary file: {error}")
+            })?;
 
         let mut hasher = Sha1::new();
         let mut total_bytes: u64 = 0;
@@ -211,7 +269,9 @@ impl DownloadInfo {
         loop {
             let count = response
                 .read(&mut buffer)
-                .map_err(|error| format!("JAR download interrupted: {error}"))?;
+                .map_err(|error| {
+                    format!("Download interrupted: {error}")
+                })?;
 
             if count == 0 {
                 break;
@@ -221,16 +281,21 @@ impl DownloadInfo {
             hasher.update(&buffer[..count]);
 
             file.write_all(&buffer[..count])
-                .map_err(|error| format!("Cannot write JAR file: {error}"))?;
+                .map_err(|error| {
+                    format!("Cannot write downloaded file: {error}")
+                })?;
         }
 
         file.flush()
-            .map_err(|error| format!("Cannot flush JAR file: {error}"))?;
+            .map_err(|error| {
+                format!("Cannot flush downloaded file: {error}")
+            })?;
 
         if total_bytes != self.size {
             return Err(format!(
-                "JAR size mismatch: expected {} bytes, received {} bytes",
-                self.size, total_bytes
+                "File size mismatch: expected {} bytes, received {} bytes",
+                self.size,
+                total_bytes
             ));
         }
 
@@ -238,8 +303,9 @@ impl DownloadInfo {
 
         if !actual_hash.eq_ignore_ascii_case(&self.sha1) {
             return Err(format!(
-                "JAR SHA-1 mismatch: expected {}, received {}",
-                self.sha1, actual_hash
+                "SHA-1 mismatch: expected {}, received {}",
+                self.sha1,
+                actual_hash
             ));
         }
 
@@ -292,7 +358,25 @@ mod tests {
             "component": "java-runtime-epsilon",
             "majorVersion": 25
         },
-        "libraries": [],
+        "libraries": [
+            {
+                "name": "org.example:test-library:1.0",
+                "downloads": {
+                    "artifact": {
+                        "sha1": "testhash",
+                        "size": 500,
+                        "url": "https://example.com/test-library.jar"
+                    },
+                    "classifiers": {
+                        "natives-linux": {
+                            "sha1": "nativehash",
+                            "size": 100,
+                            "url": "https://example.com/native.jar"
+                        }
+                    }
+                }
+            }
+        ],
         "arguments": {}
     }
     "#;
@@ -331,5 +415,39 @@ mod tests {
         assert_eq!(metadata.downloads.client.size, 1000);
         assert_eq!(metadata.asset_index.id, "34");
         assert_eq!(metadata.java_version.major_version, 25);
+    }
+
+    #[test]
+    fn parses_library_artifacts() {
+        let metadata: VersionMetadata =
+            serde_json::from_str(TEST_METADATA).unwrap();
+
+        let artifacts = metadata.library_artifacts();
+
+        assert_eq!(metadata.library_count(), 1);
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].0, "org.example:test-library:1.0");
+        assert_eq!(artifacts[0].1.size, 500);
+        assert_eq!(
+            artifacts[0].1.url,
+            "https://example.com/test-library.jar"
+        );
+    }
+
+    #[test]
+    fn parses_library_classifiers() {
+        let metadata: VersionMetadata =
+            serde_json::from_str(TEST_METADATA).unwrap();
+
+        let classifiers = metadata.libraries[0]
+            .downloads
+            .as_ref()
+            .unwrap()
+            .classifiers
+            .get("natives-linux")
+            .unwrap();
+
+        assert_eq!(classifiers.size, 100);
+        assert_eq!(classifiers.sha1, "nativehash");
     }
 }
