@@ -41,6 +41,9 @@ jobs:
           test -x "$TOOLCHAIN/llvm-ar"
           ln -sf "$TOOLCHAIN/llvm-ar" "$TOOLCHAIN/aarch64-linux-android-ar"
 
+          test -x "$TOOLCHAIN/ld.lld"
+          ln -sf "$TOOLCHAIN/ld.lld" "$TOOLCHAIN/aarch64-linux-android-ld"
+
       - name: Verify Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
