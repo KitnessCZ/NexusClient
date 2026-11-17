@@ -1,3 +1,4 @@
+
 name: Build NexusClient APK
 
 on:
@@ -52,7 +53,6 @@ jobs:
 
           rustup toolchain install 1.95.0 --profile minimal
           rustup default 1.95.0
-
           rustup target add aarch64-linux-android
 
           rustc --version
@@ -60,6 +60,27 @@ jobs:
 
       - name: Install cargo-apk2
         run: cargo +1.95.0 install --locked cargo-apk2
+
+      - name: Generate temporary APK signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KEYSTORE="$RUNNER_TEMP/nexusclient-release.keystore"
+          PASSWORD="NexusClientTemporaryBuildKey2026"
+
+          keytool -genkeypair \
+            -keystore "$KEYSTORE" \
+            -storepass "$PASSWORD" \
+            -keypass "$PASSWORD" \
+            -alias nexusclient \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=NexusClient, OU=Development, O=NexusClient, L=Prague, ST=Prague, C=CZ"
+
+          echo "CARGO_APK_RELEASE_KEYSTORE=$KEYSTORE" >> "$GITHUB_ENV"
+          echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
 
       - name: Build NexusClient APK
         shell: bash
