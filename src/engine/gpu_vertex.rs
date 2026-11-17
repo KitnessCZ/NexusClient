@@ -1,33 +1,31 @@
 
 use super::MeshVertex;
+use std::mem::size_of;
 
 /// GPU-friendly vertex data.
 ///
-/// Uses only 32-bit floating-point values so the renderer can
-/// describe the vertex layout consistently across graphics backends.
+/// Field order and types must match the WGSL vertex shader.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GpuVertex {
-    /// Position relative to the chunk origin.
     pub position: [f32; 3],
-
-    /// Surface normal.
     pub normal: [f32; 3],
-
-    /// Texture coordinates.
     pub uv: [f32; 2],
-
-    /// Block identifier converted to a float for GPU attributes.
     pub block_id: f32,
-
-    /// Face direction:
-    /// 0 = +Z, 1 = -Z, 2 = +X,
-    /// 3 = -X, 4 = +Y, 5 = -Y.
     pub face: f32,
 }
 
 impl GpuVertex {
-    /// Converts one engine mesh vertex into GPU vertex data.
+    const ATTRIBUTES: [wgpu::VertexAttribute; 5] =
+        wgpu::vertex_attr_array![
+            0 => Float32x3,
+            1 => Float32x3,
+            2 => Float32x2,
+            3 => Float32,
+            4 => Float32
+        ];
+
+    /// Converts an engine mesh vertex into GPU vertex data.
     pub fn from_mesh_vertex(vertex: &MeshVertex) -> Self {
         Self {
             position: vertex.position,
@@ -37,9 +35,18 @@ impl GpuVertex {
             face: vertex.face as f32,
         }
     }
+
+    /// Returns the vertex layout expected by the block shader.
+    pub fn vertex_buffer_layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        wgpu::VertexBufferLayout {
+            array_stride: size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBUTES,
+        }
+    }
 }
 
-/// Converts a complete engine mesh vertex list into GPU vertex data.
+/// Converts a complete mesh vertex list into GPU vertex data.
 pub fn convert_vertices(vertices: &[MeshVertex]) -> Vec<GpuVertex> {
     vertices
         .iter()
@@ -99,8 +106,15 @@ mod tests {
 
     #[test]
     fn converts_empty_vertex_list() {
-        let converted = convert_vertices(&[]);
+        assert!(convert_vertices(&[]).is_empty());
+    }
 
-        assert!(converted.is_empty());
+    #[test]
+    fn vertex_layout_matches_shader_attributes() {
+        let layout = GpuVertex::vertex_buffer_layout();
+
+        assert_eq!(layout.array_stride, 40);
+        assert_eq!(layout.attributes.len(), 5);
+        assert_eq!(layout.step_mode, wgpu::VertexStepMode::Vertex);
     }
 }
