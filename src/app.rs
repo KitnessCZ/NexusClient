@@ -15,10 +15,20 @@ enum Screen {
     About,
 }
 
+const PROFILES: [&str; 3] = ["DEFAULT", "PERFORMANCE", "VISUAL"];
+
 #[derive(Serialize, Deserialize)]
 struct SavedSettings {
+    #[serde(default)]
     theme_index: usize,
+    #[serde(default = "default_show_fps")]
     show_fps: bool,
+    #[serde(default)]
+    profile_index: usize,
+}
+
+fn default_show_fps() -> bool {
+    true
 }
 
 impl Default for SavedSettings {
@@ -26,6 +36,7 @@ impl Default for SavedSettings {
         Self {
             theme_index: 0,
             show_fps: true,
+            profile_index: 0,
         }
     }
 }
@@ -34,6 +45,8 @@ pub struct NexusApp {
     screen: Screen,
     theme_index: usize,
     show_fps: bool,
+    profile_index: usize,
+    show_profile_menu: bool,
     settings_path: Option<PathBuf>,
     pointer: (f32, f32),
     pointer_pressed: bool,
@@ -47,15 +60,15 @@ impl NexusApp {
         let saved = settings_path
             .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
-            .and_then(|contents| {
-                serde_json::from_str::<SavedSettings>(&contents).ok()
-            })
+            .and_then(|contents| serde_json::from_str::<SavedSettings>(&contents).ok())
             .unwrap_or_default();
 
         Self {
             screen: Screen::Dashboard,
             theme_index: saved.theme_index.min(Theme::PRESETS.len() - 1),
             show_fps: saved.show_fps,
+            profile_index: saved.profile_index.min(PROFILES.len() - 1),
+            show_profile_menu: false,
             settings_path,
             pointer: (0.0, 0.0),
             pointer_pressed: false,
@@ -65,8 +78,12 @@ impl NexusApp {
 
     pub fn update(&mut self) {
         if is_key_pressed(KeyCode::Escape) {
-            self.screen = Screen::Dashboard;
-            self.notice = None;
+            if self.show_profile_menu {
+                self.show_profile_menu = false;
+            } else {
+                self.screen = Screen::Dashboard;
+                self.notice = None;
+            }
         }
 
         if is_key_pressed(KeyCode::F3) {
@@ -79,7 +96,6 @@ impl NexusApp {
         let physical_width = screen_width();
         let physical_height = screen_height();
 
-        // Use a 1280x720 design space in landscape and 720x1280 in portrait.
         let scale = if physical_width >= physical_height {
             (physical_width / 1280.0).min(physical_height / 720.0)
         } else {
@@ -91,8 +107,6 @@ impl NexusApp {
         let height = physical_height / scale;
         let portrait = width < height;
 
-        // All UI drawing uses logical coordinates. Macroquad scales them
-        // to the actual display size through this camera.
         let camera = Camera2D::from_display_rect(Rect::new(
             0.0,
             0.0,
@@ -136,6 +150,10 @@ impl NexusApp {
                 white,
                 muted,
             );
+        }
+
+        if self.show_profile_menu {
+            self.draw_profile_popup(width, height, surface, surface_alt, accent, white, muted);
         }
 
         if self.show_fps {
@@ -231,7 +249,6 @@ impl NexusApp {
         white: Color,
         muted: Color,
     ) {
-        // In portrait, navigation becomes a two-row touch-friendly grid.
         self.draw_brand(22.0, 22.0, accent, white, muted);
 
         let nav_x = 16.0;
@@ -342,7 +359,7 @@ impl NexusApp {
     }
 
     fn draw_top_bar(
-        &self,
+        &mut self,
         x: f32,
         y: f32,
         width: f32,
@@ -351,12 +368,12 @@ impl NexusApp {
     ) {
         draw_text("NEXUSCLIENT", x, y + 15.0, 12.0, accent);
 
-        let profile = "PROFILE  /  DEFAULT";
-        let profile_width = measure_text(profile, None, 14, 1.0).width;
+        let profile = format!("PROFILE  /  {}", PROFILES[self.profile_index]);
+        let profile_width = measure_text(&profile, None, 14, 1.0).width;
         let profile_x = x + width - profile_width - 28.0;
 
         self.simple_button(
-            profile,
+            &profile,
             profile_x,
             y - 2.0,
             profile_width + 28.0,
@@ -369,7 +386,8 @@ impl NexusApp {
         if self.pointer_pressed
             && point_in_rect(self.pointer, profile_x, y - 2.0, profile_width + 28.0, 38.0)
         {
-            self.notice = Some("Profile selection is not implemented yet.".to_owned());
+            self.show_profile_menu = !self.show_profile_menu;
+            self.notice = None;
         }
 
         draw_line(
@@ -427,6 +445,7 @@ impl NexusApp {
         if hovered && self.pointer_pressed {
             self.screen = target;
             self.notice = None;
+            self.show_profile_menu = false;
         }
     }
 
@@ -485,13 +504,7 @@ impl NexusApp {
         let info_y = card_y + 138.0;
         let info_width = (width - 48.0).min(470.0);
 
-        draw_rectangle(
-            inner_x,
-            info_y,
-            info_width,
-            74.0,
-            surface_alt,
-        );
+        draw_rectangle(inner_x, info_y, info_width, 74.0, surface_alt);
 
         draw_text("CLIENT STATUS", inner_x + 14.0, info_y + 24.0, 11.0, accent);
         draw_text("Foundation build", inner_x + 14.0, info_y + 47.0, 16.0, white);
@@ -524,7 +537,7 @@ impl NexusApp {
         let profile_width = (width - button_width - 84.0).clamp(110.0, 180.0);
 
         self.simple_button(
-            "DEFAULT PROFILE",
+            &format!("{} PROFILE", PROFILES[self.profile_index]),
             profile_x,
             button_y,
             profile_width,
@@ -535,25 +548,14 @@ impl NexusApp {
         );
 
         if self.pointer_pressed
-            && point_in_rect(
-                self.pointer,
-                profile_x,
-                button_y,
-                profile_width,
-                46.0,
-            )
+            && point_in_rect(self.pointer, profile_x, button_y, profile_width, 46.0)
         {
-            self.notice = Some("Profile selection is not implemented yet.".to_owned());
+            self.show_profile_menu = !self.show_profile_menu;
+            self.notice = None;
         }
 
         if let Some(notice) = &self.notice {
-            draw_text(
-                notice,
-                x,
-                card_y + card_height + 28.0,
-                13.0,
-                accent,
-            );
+            draw_text(notice, x, card_y + card_height + 28.0, 13.0, accent);
         } else {
             draw_text(
                 "The launcher is ready. Minecraft gameplay is still under development.",
@@ -562,6 +564,147 @@ impl NexusApp {
                 12.0,
                 muted,
             );
+        }
+    }
+
+    fn draw_profile_popup(
+        &mut self,
+        width: f32,
+        height: f32,
+        surface: Color,
+        surface_alt: Color,
+        accent: Color,
+        white: Color,
+        muted: Color,
+    ) {
+        let popup_width = 300.0_f32.min(width - 32.0);
+        let popup_height = 270.0;
+        let popup_x = (width - popup_width) / 2.0;
+        let popup_y = (height - popup_height) / 2.0;
+
+        draw_rectangle(
+            0.0,
+            0.0,
+            width,
+            height,
+            Color::new(0.0, 0.0, 0.0, 0.65),
+        );
+
+        draw_rectangle(
+            popup_x,
+            popup_y,
+            popup_width,
+            popup_height,
+            surface,
+        );
+
+        draw_rectangle(popup_x, popup_y, popup_width, 4.0, accent);
+
+        draw_text(
+            "SELECT PROFILE",
+            popup_x + 22.0,
+            popup_y + 38.0,
+            17.0,
+            white,
+        );
+
+        draw_text(
+            "Choose your launcher profile.",
+            popup_x + 22.0,
+            popup_y + 62.0,
+            12.0,
+            muted,
+        );
+
+        let descriptions = [
+            "Balanced default configuration",
+            "Designed for lower-end devices",
+            "Designed for higher visual quality",
+        ];
+
+        for index in 0..PROFILES.len() {
+            let button_y = popup_y + 82.0 + index as f32 * 52.0;
+            let selected = self.profile_index == index;
+            let hovered = point_in_rect(
+                self.pointer,
+                popup_x + 16.0,
+                button_y,
+                popup_width - 32.0,
+                44.0,
+            );
+
+            let fill = if selected {
+                Color::new(
+                    accent.r * 0.24,
+                    accent.g * 0.24,
+                    accent.b * 0.24,
+                    1.0,
+                )
+            } else if hovered {
+                surface_alt
+            } else {
+                Color::from_rgba(23, 24, 32, 255)
+            };
+
+            draw_rectangle(
+                popup_x + 16.0,
+                button_y,
+                popup_width - 32.0,
+                44.0,
+                fill,
+            );
+
+            draw_text(
+                PROFILES[index],
+                popup_x + 28.0,
+                button_y + 19.0,
+                13.0,
+                if selected { accent } else { white },
+            );
+
+            draw_text(
+                descriptions[index],
+                popup_x + 28.0,
+                button_y + 35.0,
+                10.0,
+                muted,
+            );
+
+            if hovered && self.pointer_pressed {
+                self.profile_index = index;
+                self.show_profile_menu = false;
+                self.notice = Some(
+                    format!("{} profile selected.", PROFILES[index]),
+                );
+                self.save();
+            }
+        }
+
+        let close_y = popup_y + popup_height - 38.0;
+        let close_width = 90.0;
+        let close_x = popup_x + popup_width - close_width - 16.0;
+
+        self.simple_button(
+            "CLOSE",
+            close_x,
+            close_y,
+            close_width,
+            28.0,
+            surface_alt,
+            white,
+            11,
+        );
+
+        if self.pointer_pressed
+            && point_in_rect(
+                self.pointer,
+                close_x,
+                close_y,
+                close_width,
+                28.0,
+            )
+        {
+            self.show_profile_menu = false;
         }
     }
 
@@ -685,7 +828,13 @@ impl NexusApp {
         );
 
         if self.pointer_pressed
-            && point_in_rect(self.pointer, x + 18.0, fps_y - 24.0, 220.0, 42.0)
+            && point_in_rect(
+                self.pointer,
+                x + 18.0,
+                fps_y - 24.0,
+                220.0,
+                42.0,
+            )
         {
             self.show_fps = !self.show_fps;
             self.save();
@@ -807,6 +956,7 @@ impl NexusApp {
         let saved = SavedSettings {
             theme_index: self.theme_index,
             show_fps: self.show_fps,
+            profile_index: self.profile_index,
         };
 
         if let Ok(contents) = serde_json::to_string_pretty(&saved) {
