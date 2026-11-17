@@ -1,5 +1,6 @@
 
 use bytemuck::{Pod, Zeroable};
+use wgpu::util::DeviceExt;
 
 use super::Camera;
 
@@ -17,7 +18,7 @@ pub struct GpuCamera {
 }
 
 impl GpuCamera {
-    /// Creates the camera uniform buffer and its bind group.
+    /// Creates and initializes the camera uniform buffer and bind group.
     pub fn new(
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
@@ -28,21 +29,25 @@ impl GpuCamera {
             view_projection: view_projection_matrix(camera, aspect_ratio),
         };
 
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("NexusClient Camera Uniform Buffer"),
-            size: std::mem::size_of::<CameraUniform>() as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("NexusClient Camera Uniform Buffer"),
+                contents: bytemuck::bytes_of(&uniform),
+                usage: wgpu::BufferUsages::UNIFORM
+                    | wgpu::BufferUsages::COPY_DST,
+            },
+        );
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("NexusClient Camera Bind Group"),
-            layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-        });
+        let bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                label: Some("NexusClient Camera Bind Group"),
+                layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+            },
+        );
 
         Self { buffer, bind_group }
     }
@@ -58,7 +63,11 @@ impl GpuCamera {
             view_projection: view_projection_matrix(camera, aspect_ratio),
         };
 
-        queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&uniform));
+        queue.write_buffer(
+            &self.buffer,
+            0,
+            bytemuck::bytes_of(&uniform),
+        );
     }
 
     /// Returns the bind group required by BlockRenderPipeline.
