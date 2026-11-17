@@ -1,10 +1,10 @@
-
 name: Build NexusClient APK
 
 on:
   push:
     branches:
       - main
+      - wgpu-migration
   workflow_dispatch:
 
 env:
@@ -40,20 +40,12 @@ jobs:
 
           test -d "$NDK_PATH"
           test -f "$ANDROID_SDK_ROOT/platforms/android-35/android.jar"
-          test -x "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
 
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
           echo "NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
 
-          echo "Android SDK and NDK verified."
-
-      - name: Install required system tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zip unzip
-
-      - name: Install Rust 1.95.0
+      - name: Install Rust
         shell: bash
         run: |
           set -euo pipefail
@@ -61,26 +53,19 @@ jobs:
           rustup toolchain install 1.95.0 --profile minimal
           rustup default 1.95.0
 
-          rustup target add \
-            aarch64-linux-android \
-            armv7-linux-androideabi \
-            i686-linux-android
+          rustup target add aarch64-linux-android
 
           rustc --version
           cargo --version
 
-
-      - name: Install cargo-quad-apk
-        run: |
-          cargo +1.95.0 install --locked \
-            --git https://github.com/hoklims/cargo-quad-apk \
-            cargo-quad-apk
+      - name: Install cargo-apk2
+        run: cargo +1.95.0 install --locked cargo-apk2
 
       - name: Build NexusClient APK
         shell: bash
         run: |
           set -euo pipefail
-          cargo quad-apk build --release
+          cargo apk2 build --release
 
       - name: Verify APK
         id: verify_apk
@@ -88,16 +73,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          APK="$(find target/android-artifacts/release/apk \
-            -maxdepth 1 \
-            -type f \
-            -name '*.apk' \
-            ! -name '*_unaligned.apk' \
+          APK="$(find target -type f -name '*.apk' \
+            ! -name '*unaligned.apk' \
             -print -quit)"
 
           if [ -z "$APK" ]; then
-            echo "::error::No final APK was generated."
-            find target/android-artifacts -type f -print || true
+            echo "::error::No APK was generated."
+            find target -type f -print || true
             exit 1
           fi
 
@@ -109,7 +91,7 @@ jobs:
       - name: Upload NexusClient APK
         uses: actions/upload-artifact@v4
         with:
-          name: NexusClient-Android-ARM64
+          name: NexusClient-WGPU-Android-ARM64
           path: ${{ steps.verify_apk.outputs.apk_path }}
           if-no-files-found: error
           retention-days: 14
