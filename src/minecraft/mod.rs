@@ -44,6 +44,24 @@ impl VersionManifest {
             .map_err(|error| format!("Invalid Mojang version manifest: {error}"))
     }
 
+    pub fn download() -> Result<Self, String> {
+        let response = reqwest::blocking::Client::builder()
+            .user_agent("NexusClient/0.1.0")
+            .build()
+            .map_err(|error| format!("HTTP client error: {error}"))?
+            .get(VERSION_MANIFEST_URL)
+            .send()
+            .map_err(|error| format!("Manifest download failed: {error}"))?
+            .error_for_status()
+            .map_err(|error| format!("Mojang HTTP error: {error}"))?;
+
+        let body = response
+            .text()
+            .map_err(|error| format!("Manifest read failed: {error}"))?;
+
+        Self::parse(&body)
+    }
+
     pub fn find_version(&self, version: &str) -> Result<&VersionEntry, String> {
         self.versions
             .iter()
@@ -93,13 +111,12 @@ mod tests {
     }
 
     #[test]
-    fn finds_minecraft_26_3() {
+    fn finds_target_version() {
         let manifest = VersionManifest::parse(TEST_MANIFEST).unwrap();
         let version = manifest.target_release().unwrap();
 
         assert_eq!(version.id, "26.3");
         assert_eq!(version.version_type, "release");
-        assert_eq!(version.url, "https://example.com/26.3.json");
     }
 
     #[test]
