@@ -1,9 +1,13 @@
 
 use super::{
-    generate_test_world, Camera, PhysicsInput, Player, PlayerPhysics, World,
+    generate_test_world, raycast, BlockHit, BlockId, Camera, PhysicsInput,
+    Player, PlayerPhysics, World,
 };
 
-/// Input supplied to one engine update.
+const REACH_DISTANCE: f32 = 6.0;
+const PLAYER_HALF_WIDTH: f32 = 0.3;
+const PLAYER_HEIGHT: f32 = 1.8;
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EngineInput {
     pub forward: f32,
@@ -13,7 +17,6 @@ pub struct EngineInput {
     pub jump: bool,
 }
 
-/// Data produced after an engine update.
 #[derive(Clone, Copy, Debug)]
 pub struct EngineFrame {
     pub camera: Camera,
@@ -23,7 +26,6 @@ pub struct EngineFrame {
     pub on_ground: bool,
 }
 
-/// Main runtime state for NexusClient.
 pub struct Engine {
     world: World,
     player: Player,
@@ -78,6 +80,70 @@ impl Engine {
         self.frame_number
     }
 
+    /// Returns the block currently targeted by the player's camera.
+    pub fn targeted_block(&self) -> Option<BlockHit> {
+        let camera = self.player.camera();
+
+        raycast(
+            &self.world,
+            camera.position(),
+            camera.forward(),
+            REACH_DISTANCE,
+        )
+    }
+
+    /// Removes the block currently targeted by the player.
+    ///
+    /// Returns the removed block information, or None if no block is hit.
+    pub fn break_targeted_block(&mut self) -> Option<BlockHit> {
+        let hit = self.targeted_block()?;
+
+        self.world.set_block(
+            hit.block_position[0],
+            hit.block_position[1],
+            hit.block_position[2],
+            BlockId::AIR,
+        );
+
+        Some(hit)
+    }
+
+    /// Places a block against the face currently targeted by the player.
+    ///
+    /// Returns the placed block position on success.
+    pub fn place_targeted_block(
+        &mut self,
+        block: BlockId,
+    ) -> Option<[i32; 3]> {
+        if block.is_air() {
+            return None;
+        }
+
+        let hit = self.targeted_block()?;
+        let position = hit.previous_position;
+
+        if !self.world.get_block(
+            position[0],
+            position[1],
+            position[2],
+        ).is_air() {
+            return None;
+        }
+
+        if block_intersects_player(position, self.player.position()) {
+            return None;
+        }
+
+        self.world.set_block(
+            position[0],
+            position[1],
+            position[2],
+            block,
+        );
+
+        Some(position)
+    }
+
     /// Processes input, physics, and timing for one frame.
     pub fn update(
         &mut self,
@@ -117,13 +183,51 @@ impl Engine {
         }
     }
 
-    /// Resets the player and timing without deleting the world.
     pub fn reset_player(&mut self, position: [f32; 3]) {
         self.player = Player::new(position);
         self.physics.reset();
         self.elapsed_seconds = 0.0;
         self.frame_number = 0;
     }
+}
+
+fn block_intersects_player(
+    block: [i32; 3],
+    player: [f32; 3],
+) -> bool {
+    let block_min = [
+        block[0] as f32,
+        block[1] as f32,
+        block[2] as f32,
+    ];
+
+    let block_max = [
+        block_min[0] + 1.0,
+        block_min[1] + 1.0,
+        block_min[2] + 1.0,
+    ];
+
+    let player_min = [
+        player[0] - PLAYER_HALF_WIDTH,
+        player[1],
+        player[2] - PLAYER_HALF_WIDTH,
+    ];
+
+    let player_max = [
+        player[0] + PLAYER_HALF_WIDTH,
+        player[1] + PLAYER_HEIGHT,
+        player[2] + PLAYER_HALF_WIDTH,
+    ];
+
+    for axis in 0..3 {
+        if block_max[axis] <= player_min[axis]
+            || block_min[axis] >= player_max[axis]
+        {
+            return false;
+        }
+    }
+
+    true
 }
 
 impl Default for Engine {
@@ -212,6 +316,78 @@ mod tests {
 
         assert!(engine.player().position()[1] > 1.0);
         assert!(!frame.on_ground);
+    }
+
+    #[test]
+    fn engine_can_target_a_block() {
+        let mut world = World::new();
+        world.set_block(0, 2, 3, BlockId::STONE);
+
+        let player = Player::new([0.5, 1.0, 0.5]);
+        let engine = Engine::with_world(world, player);
+
+        let hit = engine.targeted_block().unwrap();
+
+        assert_eq!(hit.block_position, [0, 2, 3]);
+        assert_eq!(hit.block, BlockId::STONE);
+    }
+
+    #[test]
+    fn engine_can_break_targeted_block() {
+        let mut world = World::new();
+        world.set_block(0, 2, 3, BlockId::STONE);
+
+        let player = Player::new([0.5, 1.0, 0.5]);
+        let mut engine = Engine::with_world(world, player);
+
+        let hit = engine.break_targeted_block().unwrap();
+
+        assert_eq!(hit.block, BlockId::STONE);
+        assert_eq!(engine.world().get_block(0, 2, 3), BlockId::AIR);
+    }
+
+    #[test]
+    fn engine_can_place_block() {
+        let mut world = World::new();
+        world.set_block(0, 2, 3, BlockId::STONE);
+
+        let player = Player::new([0.5, 1.0, 0.5]);
+        let mut engine = Engine::with_world(world, player);
+
+        let placed = engine.place_targeted_block(BlockId::DIRT);
+
+        assert_eq!(placed, Some([0, 2, 2]));
+        assert_eq!(engine.world().get_block(0, 2, 2), BlockId::DIRT);
+    }
+
+    #[test]
+    fn cannot_place_air() {
+        let mut world = World::new();
+        world.set_block(0, 2, 3, BlockId::STONE);
+
+        let player = Player::new([0.5, 1.0, 0.5]);
+        let mut engine = Engine::with_world(world, player);
+
+        assert_eq!(
+            engine.place_targeted_block(BlockId::AIR),
+            None
+        );
+    }
+
+    #[test]
+    fn cannot_place_block_inside_player() {
+        let mut world = World::new();
+        world.set_block(0, 2, 3, BlockId::STONE);
+
+        let player = Player::new([0.5, 1.0, 0.5]);
+        let mut engine = Engine::with_world(world, player);
+
+        // The block immediately in front of the player is not inside
+        // the player's collision box, so normal placement is allowed.
+        assert_eq!(
+            engine.place_targeted_block(BlockId::STONE),
+            Some([0, 2, 2])
+        );
     }
 
     #[test]
