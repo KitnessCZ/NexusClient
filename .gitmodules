@@ -1,0 +1,3 @@
+[submodule "vendor/starling"]
+	path = vendor/starling
+	url = https://github.com/starling-client/starling.git
